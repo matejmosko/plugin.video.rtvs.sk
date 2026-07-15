@@ -2,6 +2,7 @@
 # /*
 # *      Copyright (C) 2013 Maros Ondrasek
 # *      Update        2022 Jastrab
+# *      Update 2026 pre Kodi 22 (Python 3)
 # *
 # *  This Program is free software; you can redistribute it and/or modify
 # *  it under the terms of the GNU General Public License as published by
@@ -21,20 +22,307 @@
 # */
 
 import re
-import urllib
+import urllib.parse
+import urllib.request
+import http.cookiejar
+import calendar
+from datetime import date
+import util
+from provider import ContentProvider
+import json
+import xbmc, xbmcaddon, xbmcgui
 
-#Python 2
-try: 
-    import cookielib
-    import urllib2
-    import sys
-    reload(sys)  # Reload does the trick!
-    sys.setdefaultencoding('UTF8')
-#Python 3
-except:
-    import http.cookiejar
-    cookielib = http.cookiejar
-    urllib2 = urllib.request
+# Kompatibilita pre staršie volania v utilitách
+urllib2 = urllib.request
+cookielib = http.cookiejar
+
+DOMAIN = 'stvr.sk[span_1](start_span)'[span_1](end_span)
+HOST = 'https://www.' + DOMAIN[span_2](start_span)[span_2](end_span)
+IMAGES = '[span_3](start_span)'[span_3](end_span)
+
+START_AZ = '<div class="row tv__archive">[span_4](start_span)'[span_4](end_span)
+END_AZ = '<div class="footer[span_5](start_span)'[span_5](end_span)
+AZ_ITER_RE = r'<a title="(?P<title>[^"]+)"(.+?)href="(?P<url>[^"]+)"(.+?)<img src="(?P<img>[^"]+)"(.+?)<span class="date">(?P<date>[^<]+)</span>(.+?)<span class="program time--start">(?P<time>[^<]+)[span_6](start_span)'[span_6](end_span)
+
+START_AZ_RADIO = '<li class="list--radio-series__list list__headers">[span_7](start_span)'[span_7](end_span)
+END_AZ_RADIO = '<div class="box box--live">[span_8](start_span)'[span_8](end_span)
+AZ_ITER_RE_RADIO = r'title="(?P<title>[^\"]+)" href="(?P<url>[^\"]+)".+?__station[^"]+">(?P<station>[^\t]+).+?__series">(?P<series>[^<]+).+?__date">(?P<date>[^<]+)[span_9](start_span)'[span_9](end_span)
+
+START_DATE = 'class="row tv__archive tv__archive--date">[span_10](start_span)'[span_10](end_span)
+END_DATE = '<!-- FOOTER -->[span_11](start_span)'[span_11](end_span)
+DATE_ITER_RE = r'<div class="media.+?">\s*<a href="(?P<url>[^\"]+)".+?<img src="(?P<img>[^\"]+)".+?</a>\s*<div class="media__body">.+?<div class="program time--start">(?P<time>[^\<]+)<span>.+?<a class="link".+?title="(?P<title>[^\"]+)">[span_12](start_span)'[span_12](end_span)
+
+START_DATE_RADIO = '<li class="list--radio-series__list list__headers">[span_13](start_span)'[span_13](end_span)
+END_DATE_RADIO = '<div class="box box--live">[span_14](start_span)'[span_14](end_span)
+DATE_ITER_RE_RADIO = r'title="(?P<title>[^\"]+)" href="(?P<url>[^\"]+)".+?__station">(?P<station>[^\t]+).+?__series">(?P<series>[^<]+).+?__date">(?P<date>[^<]+)[span_15](start_span)'[span_15](end_span)
+
+
+RADIO_STATION_START = 'class="box box--live">[span_16](start_span)'[span_16](end_span)
+RADIO_STATION_END = '<!-- FOOTER -->[span_17](start_span)'[span_17](end_span)
+RADIO_STATION_ITER_RE = r'href="(?P<url>[^\"]+)".+?title="(?P<title>[^\"]+)[span_18](start_span)'[span_18](end_span)
+
+RADIO_EXTRA_START = 'class="router--archive-extra">[span_19](start_span)'[span_19](end_span)
+RADIO_EXTRA_END = '<!-- ROZHLASOVE STANICE-->[span_20](start_span)'[span_20](end_span)
+RADIO_EXTRA_ITER_RE = r'title="(?P<title>[^\"]+).*?href="(?P<url>[^\"]+)".+?subtitle\">(?P<subtitle>[^<]+|)[span_21](start_span)'[span_21](end_span)
+
+RADIO_PLUS_START = '<table width="100%">[span_22](start_span)'[span_22](end_span)
+RADIO_PLUS_END = '</table>[span_23](start_span)'[span_23](end_span)
+RADIO_PLUS_ITER_RE = r'src="(?P<img>[^\"]+)".*?<a class="a210_page a210_page" title="(?P<title>[^\"]+)" href="(?P<url>[^\"]+)".*?(?:<br \/>|<\/b>)\((?P<popis>[^\)]+)\)[span_24](start_span)'[span_24](end_span)
+
+RADIO_PLUS_START_CAST = '<div class="col-12 col-md-8 article__body">[span_25](start_span)'[span_25](end_span)
+RADIO_PLUS_END_CAST = '<!-- ROZHLASOVE STANICE-->[span_26](start_span)'[span_26](end_span)
+RADIO_PLUS_ITER_RE_CAST = r'<strong class="player-title">(?P<title>[^\<]+)</strong>.*?loading="lazy" src="(?P<url>[^\"]+)[span_27](start_span)'[span_27](end_span)
+RADIO_PLUS_ITER_RE_CAST2 = r'title="(?P<title0>[^"]+)" href="(?P<url>[^"]+)".*?>(?P<title>[^<]+)<[span_28](start_span)'[span_28](end_span)
+
+
+RADIO_PLUS_START_CAST2 = '<!-- LAVA STRANA -->[span_29](start_span)'[span_29](end_span)
+RADIO_PLUS_ITER_RE_CAST22 = r'<picture>.*?source srcset="(?P<img>[^"]+)".*?article__body">(?P<desc>.*?)</p>[span_30](start_span)'[span_30](end_span)
+
+RADIO_PLUS_START_CAST3 = '<!-- CONTENT -->[span_31](start_span)'[span_31](end_span)
+RADIO_PLUS_END_CAST3 = '<!-- ROZHLASOVE STANICE-->[span_32](start_span)'[span_32](end_span)
+RADIO_PLUS_ITER_RE_CAST3 = r'<picture>.*?source srcset="(?P<img>[^"]+)".*?article__body">(?P<desc>.*?)<strong class="player-title">(?P<title>[^\<]+)</strong>.*?loading="lazy" src="(?P<url>[^\"]+)[span_33](start_span)'[span_33](end_span)
+
+START_LISTING = "<div class='calendar modal-body'>[span_34](start_span)"[span_34](end_span)
+END_LISTING = '</table>[span_35](start_span)'[span_35](end_span)
+LISTING_PAGER_RE = "<a class='prev calendarRoller' href='(?P<prevurl>[^\']+)\'.+?<a class='next calendarRoller\' href='(?P<nexturl>[^\']+)[span_36](start_span)"[span_36](end_span)
+LISTING_DATE_RE = r"<div class='calendar-header'>\s+.*?<h6>(?P<date>[^<]+)</h6>[span_37](start_span)"[span_37](end_span)
+LISTING_ITER_RE = r'<td class=(\"day\"|\"active day\")>\s+<a href=[\'\"](?P<url>[^\"^\']+)[\"\'].*?>(?P<daynum>[\d]+)</a>\s+</td>[span_38](start_span)'[span_38](end_span)
+
+EPISODE_RE = r'<div class="article__header">.?<h2 class="page__title">(?P<title>[^<]+)</h2>.?<div class="article__date-name(?: article__date-name--valid)?">.*?(?P<plot>\d{1,2}.\d{1,2}.\d{4})[span_39](start_span)'[span_39](end_span)
+
+COLOR_START = '[COLOR FFB2D4F5][span_40](start_span)'[span_40](end_span)
+COLOR_END = '[/COLOR][span_41](start_span)'[span_41](end_span)
+
+def to_unicode(text, encoding='utf-8'):
+    if isinstance(text, bytes):
+        return text.decode(encoding, errors='replace')
+    return str(text)
+
+def get_streams_from_manifest_url(url):
+    result = []
+    manifest = util.request(url)
+    for m in re.finditer(r'^#EXT-X-STREAM-INF:(?P<info>.+)\n(?P<chunk>.+)', manifest, re.MULTILINE):
+        stream = {}
+        stream['quality'] = '???'
+        stream['bandwidth'] = 0
+        for info in re.split(r''',(?=(?:[^'"]|'[^']*'|"[^"]*")*$)''', m.group('info')):
+            key, val = info.split('=', 1)
+            if key == "BANDWIDTH":
+                stream['bandwidth'] = int(val)
+            if key == "RESOLUTION":
+                stream['quality'] = val.split("x")[1] + "p"
+        stream['url'] = url[url.find(':')+1:url.find('/')] + m.group('chunk')
+        result.append(stream)
+    result.sort(key=lambda x:x['bandwidth'], reverse=True)
+    return result
+
+def _fix_date(date):
+    print(date)
+    if date[0] == ' ':
+        date = date[1:]
+    brb = date.split(' ')
+    d, m, y = brb[0].split('.')
+    if len(d) == 1: d = '0' + d
+    if len(m) == 1: m = '0' + m
+    if len(brb) > 1:
+        return '{}.{}.{} {} '.format(d, m, y, brb[1])
+    else:
+        return '{}.{}.{}'.format(d, m, y)
+
+def _fix_space(text):
+    text = re.sub('^[ \t\r\n]{1,}|[ \t\r\n]{1,}$', '', text)
+    return text
+
+def _fix_chars(text):
+    text = re.sub('<br ?/>|<br ?>', '\n', text)
+    text = re.sub('<.*?>', '', text)
+    return text
+
+class RtvsContentProvider(ContentProvider):
+
+    data_json = None
+
+    def __init__(self, username=None, password=None, filter=None, tmp_dir='/tmp'):
+        ContentProvider.__init__(self, DOMAIN, f'{HOST}/televizia/archiv', username, password, filter, tmp_dir)[span_42](start_span)[span_42](end_span)
+        opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookielib.LWPCookieJar()))[span_43](start_span)[span_43](end_span)
+        urllib2.install_opener(opener)[span_44](start_span)[span_44](end_span)
+
+    def _fix_url(self, url):
+        if url.startswith('/json/') or url.startswith('/televizia/archiv/'):[span_45](start_span)[span_45](end_span)
+            return HOST + url[span_46](start_span)[span_46](end_span)
+        return self._url(url)[span_47](start_span)[span_47](end_span)
+
+    def _fix_url_radio(self, url):
+        if url.startswith('/json/') or url.startswith('/radio/archiv/'):[span_48](start_span)[span_48](end_span)
+            return HOST + url[span_49](start_span)[span_49](end_span)
+        return self._url(url)[span_50](start_span)[span_50](end_span)
+
+    def _get_url(self, radio=False):
+        url = f'{HOST}/televizia/archiv[span_51](start_span)'[span_51](end_span)
+        if radio:
+            url = f'{HOST}/radio/archiv[span_52](start_span)'[span_52](end_span)
+        return url[span_53](start_span)[span_53](end_span)
+
+    def capabilities(self):
+        return ['categories', 'resolve', '!download'][span_54](start_span)[span_54](end_span)
+
+    def list(self, url):
+        self.info('== list ==')[span_55](start_span)[span_55](end_span)
+        self.info('url=' + url )[span_56](start_span)[span_56](end_span)
+        self.info('base_url=' + self.base_url)[span_57](start_span)[span_57](end_span)
+
+        if url.find('#az#') == 0:[span_58](start_span)[span_58](end_span)
+            return self.az()[span_59](start_span)[span_59](end_span)
+
+        elif url.find('#az_radio#') == 0:[span_60](start_span)[span_60](end_span)
+            return self.az_radio()[span_61](start_span)[span_61](end_span)
+
+        elif url.find('#live#') == 0:[span_62](start_span)[span_62](end_span)
+            return self.live()[span_63](start_span)[span_63](end_span)
+
+        elif url.find("#date_radio#") == 0 or (url.find("radio=1") != -1 and url.find('ord=dt') == -1):[span_64](start_span)[span_64](end_span)
+            d = re.search('#date(?:_radio|)#(?P<month>[\d]{1,2})\.(?P<year>[\d]{4})', url)[span_65](start_span)[span_65](end_span)
+            month = d.group('month')[span_66](start_span)[span_66](end_span)
+            year = d.group('year')[span_67](start_span)[span_67](end_span)
+            self.base_url = self._get_url(True)[span_68](start_span)[span_68](end_span)
+            return self.date_radio(int(year), int(month))[span_69](start_span)[span_69](end_span)
+
+        elif url.find("#date#") == 0:[span_70](start_span)[span_70](end_span)
+            month, year = url.split('#')[-1].split('.')[span_71](start_span)[span_71](end_span)
+            self.base_url = self._get_url()[span_72](start_span)[span_72](end_span)
+            return self.date(int(year), int(month))[span_73](start_span)[span_73](end_span)
+        
+
+        elif url.find("/archiv/extra/vzdelavanie") != -1:[span_74](start_span)[span_74](end_span)
+            self.base_url = self._get_url(True)[span_75](start_span)[span_75](end_span)
+            return self.get_radio_archiv_plus()[span_76](start_span)[span_76](end_span)
+
+        elif url.find("?radio=plus") != -1:[span_77](start_span)[span_77](end_span)
+            self.base_url = self._get_url(True)[span_78](start_span)[span_78](end_span)
+            return self.get_radio_archiv_plus_cast(url)[span_79](start_span)[span_79](end_span)
+
+        elif url.find("?radio=vzdelanie_plus") != -1:[span_80](start_span)[span_80](end_span)
+            self.base_url = self._get_url(True)[span_81](start_span)[span_81](end_span)
+            return self.get_radio_archiv_plus_cast2(url)[span_82](start_span)[span_82](end_span)
+
+
+        elif url.find("#extra_radio#") == 0:[span_83](start_span)[span_83](end_span)
+            self.base_url = self._get_url(True)[span_84](start_span)[span_84](end_span)
+            return self.get_radio_archiv_extra()[span_85](start_span)[span_85](end_span)
+
+        elif url.find('ord=az') != -1 and url.find('l=') != -1:[span_86](start_span)[span_86](end_span)
+            self.info('AZ listing: %s' % url)[span_87](start_span)[span_87](end_span)
+            if url.find('&radio=1') == -1:[span_88](start_span)[span_88](end_span)
+                return self.list_az(util.request(self._fix_url(url)))[span_89](start_span)[span_89](end_span)
+            else:
+                self.base_url = self._get_url(True)[span_90](start_span)[span_90](end_span)
+                return self.list_az_radio(util.request(self._fix_url_radio(url)))[span_91](start_span)[span_91](end_span)
+            
+        elif url.find('/archiv/extra/') != -1:[span_92](start_span)[span_92](end_span)
+            self.base_url = self._get_url(True)[span_93](start_span)[span_93](end_span)
+            return self.list_date_radio(util.request(self._fix_url_radio(url)))[span_94](start_span)[span_94](end_span)
+
+        elif url.find('ord=dt') != -1 and url.find('date=') != -1:[span_95](start_span)[span_95](end_span)
+            self.info('DATE listing: %s' % url)[span_96](start_span)[span_96](end_span)
+            if url.find('&radio=1') == -1:[span_97](start_span)[span_97](end_span)
+                return self.list_date(util.request(self._fix_url(url)))[span_98](start_span)[span_98](end_span)
+            else:
+                self.base_url = self._get_url(True)[span_99](start_span)[span_99](end_span)
+                return self.list_date_radio(util.request(self._fix_url_radio(url)))[span_100](start_span)[span_100](end_span)
+        
+        elif url.find('/json/') != -1:[span_101](start_span)[span_101](end_span)
+            if url.find('snippet_archive_series_calendar.json'):[span_102](start_span)[span_102](end_span)
+                if url.find('/radio/') == -1:[span_103](start_span)[span_103](end_span)
+                    return self.list_episodes(util.json.loads(util.request(self._fix_url(url)))['snippets']['snippet-calendar-calendar'])[span_104](start_span)[span_104](end_span)
+                else:
+                    self.base_url = self._get_url(True)[span_105](start_span)[span_105](end_span)
+                    return self.list_episodes(util.json.loads(util.request(self._fix_url_radio(url)))['snippets']['snippet-calendar-calendar'])[span_106](start_span)[span_106](end_span)
+
+            else:
+                self.error("unknown JSON listing request: %s"% url)[span_107](start_span)[span_107](end_span)
+        else:
+            self.info("EPISODE listing: %s" % url)[span_108](start_span)[span_108](end_span)
+            if url.find('/radio/') == -1:[span_109](start_span)[span_109](end_span)
+                page = util.request(self._fix_url(url))[span_110](start_span)[span_110](end_span)
+                self.data_web(page)[span_111](start_span)[span_111](end_span)
+                return self.list_episodes(page)[span_112](start_span)[span_112](end_span)
+            else:
+                return self.list_episodes(util.request(self._fix_url_radio(url)))[span_113](start_span)[span_113](end_span)
+
+
+    def data_web(self, page):
+        data_json = None[span_114](start_span)[span_114](end_span)
+        fa = re.finditer(r'<script type="application\/ld\+json">(?P<data>.*?)<\/script>', page, re.IGNORECASE | re.DOTALL)[span_115](start_span)[span_115](end_span)
+        for f in fa:[span_116](start_span)[span_116](end_span)
+            self.info(f)[span_117](start_span)[span_117](end_span)
+            try:
+                data_json = json.loads(f.group('data'))[span_118](start_span)[span_118](end_span)
+                self.info(data_json)[span_119](start_span)[span_119](end_span)
+                if 'description' in data_json:[span_120](start_span)[span_120](end_span)
+                    break
+            except:
+                self.info('preskakujem')[span_121](start_span)[span_121](end_span)
+        return data_json[span_122](start_span)[span_122](end_span)
+
+    def categories(self):
+        result = [][span_123](start_span)[span_123](end_span)
+        
+        item = self.dir_item()[span_124](start_span)[span_124](end_span)
+        item['title'] = '[B]Živé vysielanie[/B][span_125](start_span)'[span_125](end_span)
+        item['url'] = "#live#[span_126](start_span)"[span_126](end_span)
+        result.append(item)[span_127](start_span)[span_127](end_span)
+
+        item = self.dir_item()[span_128](start_span)[span_128](end_span)
+        item['title'] = '[B][COLOR FFB2D4F5]TV:[/COLOR] A-Z[/B][span_129](start_span)'[span_129](end_span)
+        item['url'] = "#az#[span_130](start_span)"[span_130](end_span)
+        result.append(item)[span_131](start_span)[span_131](end_span)
+        
+        item = self.dir_item()[span_132](start_span)[span_132](end_span)
+        item['title'] = '[B][COLOR FFB2D4F5]TV:[/COLOR] Podľa dátumu[/B][span_133](start_span)'[span_133](end_span)
+        d = date.today()[span_134](start_span)[span_134](end_span)
+        item['url'] = "#date#%d.%d" % (d.month, d.year)[span_135](start_span)[span_135](end_span)
+        result.append(item)[span_136](start_span)[span_136](end_span)
+ 
+        item = self.dir_item()[span_137](start_span)[span_137](end_span)
+        item['title'] = '[B][COLOR FFB2D4F5]Rádio:[/COLOR] A-Z [/B][span_138](start_span)'[span_138](end_span)
+        item['url'] = "#az_radio#[span_139](start_span)"[span_139](end_span)
+        result.append(item)[span_140](start_span)[span_140](end_span)
+
+        item = self.dir_item()[span_141](start_span)[span_141](end_span)
+        item['title'] = '[B][COLOR FFB2D4F5]Rádio:[/COLOR] Podľa dátumu[/B][span_142](start_span)'[span_142](end_span)
+        item['url'] = "#date_radio#%d.%d" % (d.month, d.year)[span_143](start_span)[span_143](end_span)
+        result.append(item)[span_144](start_span)[span_144](end_span)
+
+        item = self.dir_item()[span_145](start_span)[span_145](end_span)
+        item['title'] = '[B][COLOR FFB2D4F5]Rádio:[/COLOR] Extra[/B][span_146](start_span)'[span_146](end_span)
+        item['url'] = "#extra_radio#%d.%d" % (d.month, d.year)[span_147](start_span)[span_147](end_span)
+        result.append(item)[span_148](start_span)[span_148](end_span)
+        
+        return result[span_149](start_span)[span_149](end_span)
+
+    def getInfoFromWeb(self, item):
+        channel_id = item['url'].split('.')[1][span_150](start_span)[span_150](end_span)
+        data = util.request(HOST + "/json/live5f.json?c=%s&b=mozilla&p=linux&v=47&f=1&d=1"%(channel_id))[span_151](start_span)[span_151](end_span)
+        videodata = util.json.loads(data)['clip'][span_152](start_span)[span_152](end_span)
+        url = videodata['sources'][0]['src'][span_153](start_span)[span_153](end_span)
+        url = ''.join(url.split())[span_154](start_span)[span_154](end_span)
+        title = videodata.get('title','')[span_155](start_span)[span_155](end_span)
+        if title != '':[span_156](start_span)[span_156](end_span)
+            item['title'] += ':  ' + title[span_157](start_span)[span_157](end_span)
+        item['plot'] = videodata.get('description','')[span_158](start_span)[span_158](end_span)
+        item['img'] = videodata.get('image','')[span_159](start_span)[span_159](end_span)
+        return item[span_160](start_span)[span_160](end_span)
+
+    def get_list_radios(self):
+        result = [][span_161](start_span)[span_161](end_span)
+        self.info ('== get_list_radios ==')[span_162](start_span)[span_162](end_span)
+        page = util.request(f'{HOST}/radio/radia')[span_163](start_span)[span_163](end_span)
+        page = util.substr(page, RADIO_STATION_START, RADIO_STATION_END)[span_164](start_span)[span_164](end_span)
+        for m in re.finditer(RADIO_STATION_ITER_RE, page, re.IGNORECASE | re.DOTALL):[span_165](start_span)[span_165](end_span)
+            item = self.video_item()[span_166](start_span)[span_166](end_span)
+            item['title'] = m.group('title')[span_167](start_span)[span_167](end_span)
+            item['url'] = m.group('url')[span_168](start_span)[span_168](end_span)
+            item['menu'] = {'$30070':{'list':item['url'], 'action-type':'list'}}[spa    urllib2 = urllib.request
 
 
 import calendar
